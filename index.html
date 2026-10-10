@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>星際小隊 · Star Squad</title>
+<meta name="description" content="A vertical-scrolling space shooter: four pilots with their own weapons and skills, five stages with bosses, upgrades, supplies and a full story.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230a0e22'/%3E%3Cpath d='M8 1l2 6 4 4-4-1-2 4-2-4-4 1 4-4z' fill='%233a8aff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="touchArea"></div>
+
+  <div id="hud" hidden>
+    <div id="hudTop"><div id="hp"></div><span id="pow">P1</span><span class="grow"></span><span id="cr">🪙 0</span><span id="sc">0000000</span><button id="bPause">⏸</button></div>
+    <div id="bossBar" hidden><span id="bossName"></span><div><i id="bossHp"></i></div></div>
+    <div id="hudBot">
+      <button id="bBomb">💣<b id="bombN">0</b></button>
+      <button id="bSkill">★<span><i id="skillBar"></i></span></button>
+    </div>
+  </div>
+  <div id="flash"></div>
+  <div id="warn"></div>
+  <div id="toast"></div>
+
+  <div id="title" class="screen">
+    <div class="logo"><h1 id="tTitle"></h1><h2 id="tSub"></h2></div>
+    <div class="tbtns"><button id="tStart" class="big"></button><button id="tNew"></button><button id="tLang"></button></div>
+    <p id="tCtl" class="ctl"></p>
+  </div>
+
+  <div id="hangar" class="screen" hidden>
+    <div class="htop"><h2 id="hTitle"></h2><span class="cr">🪙 <b id="hCredits">0</b></span><span class="grow"></span>
+      <button id="hStory"></button><button id="hLang"></button><button id="hSound">🔊</button><button id="hHelp">?</button></div>
+    <div id="tabs"><button data-tab="missions"></button><button data-tab="pilots"></button><button data-tab="upgrades"></button><button data-tab="shop"></button></div>
+    <div id="panel"></div>
+    <button id="hLaunch" class="big"></button>
+  </div>
+
+  <div id="result" class="screen" hidden>
+    <h2 id="rTitle"></h2><div id="rBody"></div>
+    <div class="tbtns"><button id="rRetry" class="big"></button><button id="rHangar"></button></div>
+  </div>
+
+  <div id="ending" class="screen" hidden>
+    <h2 id="endTitle"></h2><p id="endThanks"></p>
+    <div class="crew"><img data-who="josh"><img data-who="jasper"><img data-who="jeff"><img data-who="erin"><img data-who="mira"></div>
+    <button id="endBack" class="big"></button>
+  </div>
+
+  <div id="pause" hidden><div class="box"><h2 id="pTitle"></h2><button id="pResume" class="big"></button><button id="pQuit"></button></div></div>
+
+  <div id="dialog" hidden>
+    <img id="dImg" alt="">
+    <div class="dt"><b id="dName"></b><p id="dText"></p></div>
+    <button id="dSkip"></button>
+  </div>
+
+  <div id="help" hidden><div class="box"><button id="helpClose" class="x">✕</button><h2 id="helpTitle"></h2><div id="helpBody"></div></div></div>
+</div>
+<script type="module" src="js/main.js?v=1"></script>
+<script src="/hub.js" data-pos="bottom-left" defer></script>
+</body>
+</html>
