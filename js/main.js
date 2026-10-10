@@ -1,8 +1,8 @@
-import { W, H, PILOTS, PILOT, UPGRADES, UP_COST, UP_MAX, ITEMS, STAGES } from './data.js?v=1';
-import { Game } from './game.js?v=1';
-import { draw, drawBackground, drawShip, portrait } from './render.js?v=1';
-import { sfx, music } from './audio.js?v=1';
-import { t, L, getLang, setLang, NAMES, SHIPS, PILOT_TEXT, STAGE_TEXT, UP_TEXT, ITEM_TEXT, STORY } from './i18n.js?v=1';
+import { W, H, PILOTS, PILOT, UPGRADES, UP_COST, UP_MAX, ITEMS, STAGES } from './data.js?v=2';
+import { Game } from './game.js?v=2';
+import { draw, drawBackground, drawShip, portrait } from './render.js?v=2';
+import { sfx, music } from './audio.js?v=2';
+import { t, L, getLang, setLang, NAMES, SHIPS, PILOT_TEXT, STAGE_TEXT, UP_TEXT, ITEM_TEXT, STORY } from './i18n.js?v=2';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -20,12 +20,13 @@ if (params.get('unlock')) save.cleared = Math.max(save.cleared, Number(params.ge
 
 // ------------------------------------------------------------------ canvas
 const cv = $('cv'), c = cv.getContext('2d');
-cv.width = W; cv.height = H;
-c.imageSmoothingEnabled = false;
+// the canvas is as sharp as the screen (device pixels, up to 2x); game code draws in 360x640 game units
 function fit() {
   const box = $('stage'), vw = innerWidth, vh = innerHeight;
   const s = Math.min(vw / W, vh / H);
-  box.style.width = Math.floor(W * s) + 'px'; box.style.height = Math.floor(H * s) + 'px';
+  const cw = Math.floor(W * s), ch = Math.floor(H * s), dpr = Math.min(2, window.devicePixelRatio || 1);
+  box.style.width = cw + 'px'; box.style.height = ch + 'px';
+  cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
   document.documentElement.style.setProperty('--px', s.toFixed(3));
 }
 addEventListener('resize', fit); fit();
@@ -320,19 +321,20 @@ function typeTick(dt) {
 }
 
 // ------------------------------------------------------------------ main loop
-let last = performance.now(), acc = 0;
+let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;
   S.time += dt;
   typeTick(dt);
+  c.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
   if (S.screen === 'play' && S.g) {
     const g = S.g;
     if (!S.paused && !S.dialog) {
-      acc += dt;
-      let n = 0;
-      while (acc >= 1 / 60 && n < 4) { acc -= 1 / 60; n++; g.update(1 / 60, readInput()); handleEvents(g); }
-    } else acc = 0;
+      // step with the real frame time (split into pieces of at most 1/60 s): smooth on 60, 90, 120 Hz screens alike
+      let rem = dt;
+      while (rem > 1e-6) { const h = Math.min(rem, 1 / 60); g.update(h, readInput()); handleEvents(g); rem -= h; }
+    }
     S.shake = Math.max(0, S.shake - dt * 30);
     draw(c, g, S.time, { shake: S.shake, focus: keys.has('ShiftLeft') || keys.has('ShiftRight') });
     paintHud();

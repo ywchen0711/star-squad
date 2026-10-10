@@ -1,5 +1,5 @@
 // The game itself: player, weapons, skills, enemies, bosses, bullets, pickups. No DOM: render.js draws it, tools/sim.mjs runs it in Node.
-import { W, H, PILOT, UPGRADES, ENEMIES, STAGES, CLEAR_BONUS, NOHIT_BONUS } from './data.js?v=1';
+import { W, H, PILOT, UPGRADES, ENEMIES, STAGES, CLEAR_BONUS, NOHIT_BONUS } from './data.js?v=2';
 
 const TAU = Math.PI * 2;
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -27,7 +27,7 @@ export class Game {
     const maxHp = this.pilot.hp + up(ups, 'hull') * per('hull') + (pa === 'armor' ? 2 : 0);
     this.p = {
       x: W / 2, y: H - 70, hp: maxHp, maxHp, inv: 2, power: it.power ? 3 : 1, energy: it.charge ? 100 : 0, skill: 0,
-      bombs: it.bomb || 0, shield: it.shield ? 3 : 0, repair: !!it.repair, revive: pa === 'phoenix', fire: 0, fire2: 0, fire3: 0, drones: 0, storm: 0, wob: 0,
+      vx: 0, vy: 0, pdx: 0, pdy: 0, bombs: it.bomb || 0, shield: it.shield ? 3 : 0, repair: !!it.repair, revive: pa === 'phoenix', fire: 0, fire2: 0, fire3: 0, drones: 0, storm: 0, wob: 0,
     };
     this.t = 0; this.idx = 0; this.phase = 'play'; this.phaseT = 0;
     this.pb = []; this.eb = []; this.en = []; this.pk = []; this.fx = []; this.beams = []; this.ev = [];
@@ -53,7 +53,7 @@ export class Game {
     this.pickups(dt);
     this.collide(dt);
     this.en = this.en.filter((e) => !e.dead && e.y < H + 40 && e.y > -120 && e.x > -80 && e.x < W + 80);
-    for (const f of this.fx) { f.x += f.vx * dt; f.y += f.vy * dt; f.life -= dt; }
+    for (const f of this.fx) { f.x += f.vx * dt; f.y += f.vy * dt; f.life -= dt; if (f.ring) f.r += f.vr * dt; }
     this.fx = this.fx.filter((f) => f.life > 0);
     if (this.phase === 'bossDown') {
       if (Math.random() < 0.5) this.boom(this.boss.x + rnd(-50, 50), this.boss.y + rnd(-30, 30), 10);
@@ -66,8 +66,17 @@ export class Game {
     const p = this.p, pil = this.pilot;
     const sp = this.mod.speed * (inp.focus ? 0.5 : 1) * (p.skill > 0 && pil.active === 'dash' ? 1.6 : 1);
     let ax = inp.ax || 0, ay = inp.ay || 0; const m = Math.hypot(ax, ay); if (m > 1) { ax /= m; ay /= m; }
-    p.x = clamp(p.x + ax * sp * dt + (inp.dx || 0), 10, W - 10);
-    p.y = clamp(p.y + ay * sp * dt + (inp.dy || 0), 40, H - 16);
+    // keys: the speed eases in and out over a few hundredths of a second (no jerky start / stop)
+    const k = Math.min(1, dt * 22);
+    p.vx += (ax * sp - p.vx) * k; p.vy += (ay * sp - p.vy) * k;
+    // drag: the finger's movement is applied over a few frames, so uneven touch events do not make the ship jump
+    p.pdx += inp.dx || 0; p.pdy += inp.dy || 0;
+    const f = Math.min(1, dt * 26), mx = p.pdx * f, my = p.pdy * f;
+    p.pdx -= mx; p.pdy -= my;
+    const nx = p.x + p.vx * dt + mx, ny = p.y + p.vy * dt + my;
+    p.x = clamp(nx, 12, W - 12); p.y = clamp(ny, 44, H - 18);
+    if (p.x !== nx) { p.pdx = 0; p.vx = 0; }
+    if (p.y !== ny) { p.pdy = 0; p.vy = 0; }
     p.inv = Math.max(0, p.inv - dt);
     p.energy = Math.min(100, p.energy + 1.5 * this.mod.charge * dt);
     if (p.skill > 0) { p.skill -= dt; if (p.skill <= 0) { p.skill = 0; this.emit('skillEnd'); } }
@@ -106,7 +115,7 @@ export class Game {
       }
       case 'laser': {
         // a beam straight up that stops at the first thing it hits
-        const w = 4 + 2 * L, dps = this.dmg(105 + 38 * L) * rate;
+        const w = 4 + 2 * L, dps = this.dmg(115 + 42 * L) * rate;
         let best = null, by = -40;
         const consider = (o, x, y, r) => { if (Math.abs(x - p.x) < r + w / 2 && y < p.y && y > by) { by = y; best = o; } };
         for (const e of this.en) if (!e.dead && !e.decoy) consider(e, e.x, e.y, e.r);
@@ -396,6 +405,7 @@ export class Game {
       const a = rnd(0, TAU), s = rnd(30, 160);
       this.fx.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rnd(0.25, 0.7), max: 0.7, color: color || ['#fff3a0', '#ffb03a', '#ff5a2a'][i % 3], size: rnd(1.5, 3.5) });
     }
+    if (n >= 8) this.fx.push({ x, y, vx: 0, vy: 0, ring: true, r: 3, vr: 90 + n * 5, life: 0.35, max: 0.35, color: color || '#ffd890', size: 1 });
     this.emit('boom', { n });
   }
   spark(x, y, color, n = 3) { for (let i = 0; i < n; i++) this.fx.push({ x, y, vx: rnd(-60, 60), vy: rnd(-60, 60), life: 0.25, max: 0.25, color, size: 1.5 }); }
@@ -519,7 +529,7 @@ export const BOSSES = {
     step(g, b, dt, every) {
       const sh = g.st.shot;
       b.x = W / 2 + Math.sin(b.t * 0.4) * 50;
-      const wall = (spd) => { const gap = Math.floor(rnd(2, 15)); for (let i = 0; i < 18; i++) if (Math.abs(i - gap) > 1) g.shot(8 + i * 16, b.y + 40, Math.PI / 2, spd * sh, { r: 4, color: '#ff8a2a' }); };
+      const cols = Math.floor(W / 16), wall = (spd) => { const gap = Math.floor(rnd(2, cols - 3)); for (let i = 0; i < cols; i++) if (Math.abs(i - gap) > 1) g.shot(8 + i * 16, b.y + 40, Math.PI / 2, spd * sh, { r: 4, color: '#ff8a2a' }); };
       const meteors = () => { const xs = [g.p.x, rnd(20, W - 20), rnd(20, W - 20), rnd(20, W - 20)]; xs.forEach((x, i) => g.laser(x, -10, Math.PI / 2, { w: 20, warn: 0.9 + i * 0.25, on: 0.3, color: '#ffe04a' })); };
       if (b.ph === 0) { if (every('wall', 2.4)) wall(75); if (every('fire', 1.1)) g.shot(b.x, b.y + 30, g.aim(b.x, b.y), 130 * sh, { r: 6, color: '#ffd23a' }); }
       if (b.ph === 1) { if (every('met', 3.0)) meteors(); if (every('wall', 3.4)) wall(70); }

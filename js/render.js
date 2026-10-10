@@ -1,7 +1,27 @@
-// Draws a Game onto the 288x512 canvas (shown scaled up with nearest-neighbour, so everything looks pixel-art).
-import { W, H, PILOT } from './data.js?v=1';
+// Draws a Game in game units (360x640); main.js scales the context to the screen's real resolution so everything stays sharp.
+import { W, H, PILOT } from './data.js?v=2';
 
 const TAU = Math.PI * 2;
+let lastT = null, fdt = 1 / 60;                 // time since the previous frame (scrolling and fades are time-based)
+const trail = [];
+const nebula = {};
+// soft, slowly drifting nebula clouds per stage, drawn once into an offscreen canvas
+function nebulaFor(st) {
+  if (nebula[st.id]) return nebula[st.id];
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H * 2;
+  const x = cv.getContext('2d');
+  const cols = [st.pal.glow, st.pal.a, st.pal.b];
+  for (let i = 0; i < 9; i++) {
+    const cx = Math.random() * W, cy = Math.random() * H * 2, r = 60 + Math.random() * 140;
+    const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, hexA(cols[i % 3], 0.22)); g.addColorStop(1, hexA(cols[i % 3], 0));
+    x.fillStyle = g; x.fillRect(0, 0, W, H * 2);
+    // wrap vertically so the loop is seamless
+    if (cy < r) { x.save(); x.translate(0, H * 2); x.fillRect(0, -r * 2, W, r * 2); x.restore(); }
+  }
+  return (nebula[st.id] = cv);
+}
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
 let stars = null;
 function makeStars() {
   stars = [];
@@ -16,10 +36,15 @@ function makeDecor(bg) {
 
 export function drawBackground(c, g, time) {
   const st = g.st, pal = st.pal;
+  fdt = lastT === null ? 1 / 60 : Math.min(0.05, Math.max(0, time - lastT)); lastT = time;
+  const f60 = fdt * 60;
   if (!stars) makeStars();
   if (decor.bg !== st.bg) makeDecor(st.bg);
   const gr = c.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, pal.sky[0]); gr.addColorStop(1, pal.sky[1]);
   c.fillStyle = gr; c.fillRect(0, 0, W, H);
+  // nebula clouds
+  const nb = nebulaFor(st), off = (time * 10) % (H * 2);
+  c.drawImage(nb, 0, off - H * 2); c.drawImage(nb, 0, off);
   // stage scenery behind the stars
   const scroll = time * 30;
   if (st.bg === 'forge') {
@@ -48,15 +73,15 @@ export function drawBackground(c, g, time) {
   }
   // stars
   for (const s of stars) {
-    s.y += (0.2 + s.l * 0.5) * (st.bg === 'core' ? 0.3 : 1); if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
+    s.y += (0.2 + s.l * 0.5) * (st.bg === 'core' ? 0.3 : 1) * f60; if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
     const a = 0.4 + 0.3 * s.l + 0.2 * Math.sin(time * 3 + s.tw);
     c.fillStyle = `rgba(255,255,255,${a})`;
-    c.fillRect(s.x | 0, s.y | 0, s.l === 2 ? 2 : 1, s.l === 2 ? 2 : 1);
+    c.fillRect(s.x, s.y, s.l === 2 ? 2 : 1, s.l === 2 ? 2 : 1);
   }
   // drifting scenery in front of the stars
   for (const d of decor) {
-    d.y += (0.6 + d.s * 0.5); if (d.y > H + 60) { d.y = -60; d.x = Math.random() * W; }
-    c.save(); c.translate(d.x | 0, d.y | 0); c.rotate(d.r + time * 0.2 * (d.k - 0.5));
+    d.y += (0.6 + d.s * 0.5) * f60; if (d.y > H + 60) { d.y = -60; d.x = Math.random() * W; }
+    c.save(); c.translate(d.x, d.y); c.rotate(d.r + time * 0.2 * (d.k - 0.5));
     if (st.bg === 'asteroids') { c.fillStyle = 'rgba(90,70,55,.55)'; blob(c, 18 * d.s); c.fillStyle = 'rgba(60,46,36,.6)'; c.fillRect(-4 * d.s, -3 * d.s, 6 * d.s, 5 * d.s); }
     if (st.bg === 'crystal') { c.fillStyle = d.k > 0.5 ? 'rgba(106,232,255,.35)' : 'rgba(200,160,255,.35)'; crystal(c, 14 * d.s); }
     if (st.bg === 'forge') { c.fillStyle = 'rgba(255,120,40,.25)'; c.fillRect(-1, -20 * d.s, 2, 40 * d.s); }
@@ -72,31 +97,51 @@ const circ = (c, x, y, r) => { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); 
 // ------------------------------------------------------------------ the player's ship
 export function drawShip(c, id, x, y, time, opt = {}) {
   const P = PILOT[id];
-  c.save(); c.translate(x | 0, y | 0);
+  c.save(); c.translate(x, y);
   if (opt.scale) c.scale(opt.scale, opt.scale);
-  // engine flame
-  const fl = 5 + Math.sin(time * 40) * 2 + (opt.boost ? 6 : 0);
-  c.fillStyle = '#ffd23a'; poly(c, [[-3, 8], [3, 8], [0, 8 + fl]]);
-  c.fillStyle = '#ff7a2a'; poly(c, [[-2, 8], [2, 8], [0, 8 + fl * 0.6]]);
+  // engine glow + flame
+  const fl = 6 + Math.sin(time * 40) * 2 + (opt.boost ? 7 : 0);
+  const glow = c.createRadialGradient(0, 10, 0, 0, 10, 12 + fl);
+  glow.addColorStop(0, 'rgba(255,220,120,.85)'); glow.addColorStop(0.4, 'rgba(255,140,40,.35)'); glow.addColorStop(1, 'rgba(255,90,0,0)');
+  c.fillStyle = glow; c.fillRect(-20, -4, 40, 36);
+  c.fillStyle = '#ffe88a'; poly(c, [[-3, 8], [3, 8], [0, 9 + fl]]);
+  c.fillStyle = '#ffffff'; poly(c, [[-1.4, 8], [1.4, 8], [0, 8 + fl * 0.55]]);
+  // body: shaded from dark on the left to light on the right, with a dark outline
+  const shade = c.createLinearGradient(-15, 0, 15, 0);
+  shade.addColorStop(0, P.dark); shade.addColorStop(0.45, P.color); shade.addColorStop(0.7, P.light); shade.addColorStop(1, P.color);
+  const body = {
+    josh: [[0, -14], [3, -6], [5, -2], [14, 7], [13, 9], [5, 6.5], [3, 9], [-3, 9], [-5, 6.5], [-13, 9], [-14, 7], [-5, -2], [-3, -6]],
+    jasper: [[0, -12], [4, -5], [7, -2], [15, 1], [15, 8], [7, 7], [4, 9.5], [-4, 9.5], [-7, 7], [-15, 8], [-15, 1], [-7, -2], [-4, -5]],
+    jeff: [[0, -13], [5, -9], [8, -4], [13, -1], [13, 9], [6, 10], [-6, 10], [-13, 9], [-13, -1], [-8, -4], [-5, -9]],
+    erin: [[0, -13], [3, -5], [9, -7], [16, -10], [13, 0], [8, 5], [3, 9.5], [-3, 9.5], [-8, 5], [-13, 0], [-16, -10], [-9, -7], [-3, -5]],
+  }[id];
+  c.fillStyle = shade; poly(c, body);
+  c.strokeStyle = 'rgba(5,8,20,.85)'; c.lineWidth = 0.9; c.lineJoin = 'round';
+  c.beginPath(); body.forEach(([px, py], i) => (i ? c.lineTo(px, py) : c.moveTo(px, py))); c.closePath(); c.stroke();
+  // details per ship
   c.fillStyle = P.dark;
-  if (id === 'josh') { poly(c, [[0, -13], [4, -2], [13, 8], [4, 6], [0, 9], [-4, 6], [-13, 8], [-4, -2]]); c.fillStyle = P.color; poly(c, [[0, -12], [3, -1], [10, 6], [0, 5], [-10, 6], [-3, -1]]); }
-  if (id === 'jasper') { poly(c, [[0, -11], [5, -3], [14, 2], [14, 8], [5, 7], [0, 9], [-5, 7], [-14, 8], [-14, 2], [-5, -3]]); c.fillStyle = P.color; poly(c, [[0, -10], [4, -2], [12, 3], [4, 5], [0, 7], [-4, 5], [-12, 3], [-4, -2]]); c.fillStyle = '#ffffff'; c.fillRect(-14, 1, 3, 6); c.fillRect(11, 1, 3, 6); }
-  if (id === 'jeff') { poly(c, [[0, -12], [7, -6], [12, 0], [12, 9], [0, 9], [-12, 9], [-12, 0], [-7, -6]]); c.fillStyle = P.color; poly(c, [[0, -11], [6, -5], [10, 1], [10, 7], [-10, 7], [-10, 1], [-6, -5]]); c.fillStyle = P.dark; c.fillRect(-9, 2, 4, 4); c.fillRect(5, 2, 4, 4); }
-  if (id === 'erin') { poly(c, [[0, -12], [3, -4], [15, -8], [10, 4], [4, 6], [0, 9], [-4, 6], [-10, 4], [-15, -8], [-3, -4]]); c.fillStyle = P.color; poly(c, [[0, -11], [3, -3], [12, -6], [8, 3], [0, 6], [-8, 3], [-12, -6], [-3, -3]]); c.fillStyle = '#ffd0f0'; c.fillRect(-12, -6, 2, 2); c.fillRect(10, -6, 2, 2); }
-  c.fillStyle = P.light; poly(c, [[0, -7], [2, -2], [0, 1], [-2, -2]]);          // cockpit
+  if (id === 'josh') { c.fillRect(-11, 5.2, 4, 1.4); c.fillRect(7, 5.2, 4, 1.4); c.fillStyle = '#ffffff'; c.fillRect(-0.6, -12, 1.2, 4); }
+  if (id === 'jasper') { c.fillStyle = '#e8f4ec'; c.fillRect(-15, 1.5, 3, 6); c.fillRect(12, 1.5, 3, 6); c.fillStyle = '#e8322c'; c.fillRect(-15, 1.5, 3, 1.5); c.fillRect(12, 1.5, 3, 1.5); }
+  if (id === 'jeff') { c.fillRect(-11, 1, 5, 5); c.fillRect(6, 1, 5, 5); c.fillStyle = 'rgba(255,255,255,.35)'; c.fillRect(-11, 1, 5, 1); c.fillRect(6, 1, 5, 1); }
+  if (id === 'erin') { c.fillStyle = '#ffd0f0'; for (const s of [-1, 1]) { poly(c, [[s * 14.5, -9.5], [s * 11, -6], [s * 12, -4]]); } }
+  // canopy with a highlight
+  const glass = c.createLinearGradient(0, -9, 0, 1);
+  glass.addColorStop(0, '#ffffff'); glass.addColorStop(0.35, P.light); glass.addColorStop(1, P.dark);
+  c.fillStyle = glass; poly(c, [[0, -9], [2.6, -3], [1.6, 1], [-1.6, 1], [-2.6, -3]]);
+  c.fillStyle = 'rgba(255,255,255,.9)'; c.fillRect(-1.2, -7, 1, 3);
   c.restore();
 }
 
 // ------------------------------------------------------------------ the whole frame
 export function draw(c, g, time, view = {}) {
   c.save();
-  if (view.shake) c.translate(((Math.random() - 0.5) * view.shake) | 0, ((Math.random() - 0.5) * view.shake) | 0);
+  if (view.shake) c.translate(((Math.random() - 0.5) * view.shake), ((Math.random() - 0.5) * view.shake));
   drawBackground(c, g, time);
   const pal = g.st.pal;
   // pickups
   for (const k of g.pk) {
-    if (k.kind === 'C') { const w = Math.abs(Math.cos(time * 6 + k.x)) * (k.v >= 25 ? 5 : k.v >= 5 ? 4 : 3) + 1; c.fillStyle = k.v >= 25 ? '#fff07a' : '#ffc83a'; c.fillRect((k.x - w / 2) | 0, (k.y - 3) | 0, Math.ceil(w), k.v >= 5 ? 7 : 5); c.fillStyle = '#b07a10'; c.fillRect((k.x - w / 2) | 0, (k.y + (k.v >= 5 ? 3 : 1)) | 0, Math.ceil(w), 1); }
-    if (k.kind === 'P') { c.fillStyle = '#e8322c'; c.fillRect((k.x - 6) | 0, (k.y - 5) | 0, 12, 10); c.fillStyle = '#fff'; c.font = 'bold 9px monospace'; c.textAlign = 'center'; c.fillText('P', k.x | 0, (k.y + 3) | 0); }
+    if (k.kind === 'C') { const w = Math.abs(Math.cos(time * 6 + k.x)) * (k.v >= 25 ? 5 : k.v >= 5 ? 4 : 3) + 1; c.fillStyle = k.v >= 25 ? '#fff07a' : '#ffc83a'; c.fillRect((k.x - w / 2), (k.y - 3), Math.ceil(w), k.v >= 5 ? 7 : 5); c.fillStyle = '#b07a10'; c.fillRect((k.x - w / 2), (k.y + (k.v >= 5 ? 3 : 1)), Math.ceil(w), 1); }
+    if (k.kind === 'P') { c.fillStyle = '#e8322c'; c.fillRect((k.x - 6), (k.y - 5), 12, 10); c.fillStyle = '#fff'; c.font = 'bold 9px monospace'; c.textAlign = 'center'; c.fillText('P', k.x, (k.y + 3)); }
     if (k.kind === 'H') { c.fillStyle = '#ff4a7a'; circ(c, k.x - 3, k.y - 1, 3.5); circ(c, k.x + 3, k.y - 1, 3.5); poly(c, [[k.x - 6.5, k.y], [k.x + 6.5, k.y], [k.x, k.y + 7]]); }
   }
   // enemies
@@ -113,20 +158,28 @@ export function draw(c, g, time, view = {}) {
   for (const b of g.pb) {
     if (b.kind === 'missile') { c.fillStyle = '#c4ffd4'; c.save(); c.translate(b.x, b.y); c.rotate(Math.atan2(b.vy, b.vx)); c.fillRect(-4, -1.5, 8, 3); c.fillStyle = '#ffb03a'; c.fillRect(-7, -1, 3, 2); c.restore(); }
     else if (b.kind === 'wave') { c.fillStyle = '#ecd4ff'; circ(c, b.x, b.y, 3.5); }
-    else if (b.kind === 'reflect') { c.fillStyle = '#ffd0c0'; c.fillRect((b.x - 2) | 0, (b.y - 4) | 0, 4, 8); }
-    else { c.fillStyle = b.kind === 'drone' ? '#ffd0f0' : '#fff6a0'; c.fillRect((b.x - 1.5) | 0, (b.y - 5) | 0, 3, 9); }
+    else if (b.kind === 'reflect') { c.fillStyle = '#ffd0c0'; c.fillRect((b.x - 2), (b.y - 4), 4, 8); }
+    else {
+      c.fillStyle = b.kind === 'drone' ? 'rgba(255,140,230,.22)' : 'rgba(255,220,90,.22)'; c.beginPath(); c.ellipse(b.x, b.y, 3.6, 8, 0, 0, TAU); c.fill();
+      c.fillStyle = b.kind === 'drone' ? '#ffd0f0' : '#fff6a0'; c.fillRect(b.x - 1.5, b.y - 5, 3, 9);
+      c.fillStyle = '#ffffff'; c.fillRect(b.x - 0.6, b.y - 4, 1.2, 6);
+    }
   }
   // Jeff's laser
   if (g.beam && g.pilot.weapon === 'laser' && g.phase !== 'dead') {
     const bm = g.beam, h = bm.y0 - bm.y1, fl = Math.sin(time * 50) * 1;
-    c.fillStyle = 'rgba(255,90,60,.55)'; c.fillRect((bm.x - bm.w / 2 - 2 - fl) | 0, bm.y1 | 0, (bm.w + 4 + fl * 2) | 0, h | 0);
-    c.fillStyle = '#ffe0d0'; c.fillRect((bm.x - bm.w / 4) | 0, bm.y1 | 0, Math.max(2, bm.w / 2) | 0, h | 0);
+    c.fillStyle = 'rgba(255,90,60,.55)'; c.fillRect((bm.x - bm.w / 2 - 2 - fl), bm.y1, (bm.w + 4 + fl * 2), h);
+    c.fillStyle = '#ffe0d0'; c.fillRect((bm.x - bm.w / 4), bm.y1, Math.max(2, bm.w / 2), h);
     c.fillStyle = '#ffffff'; circ(c, bm.x, bm.y1, bm.w / 2 + 2 + fl);
   }
   // player
   const p = g.p;
   if (g.phase !== 'dead') {
     if (g.pilot.weapon === 'wave') for (const d of g.dronePos()) { c.fillStyle = '#4a1a7a'; circ(c, d.x, d.y, 4); c.fillStyle = '#ecd4ff'; circ(c, d.x, d.y, 2.5); }
+    trail.push({ x: p.x + (Math.random() - 0.5) * 3, y: p.y + 11, life: 0.32 });
+    for (const t2 of trail) { t2.life -= fdt; t2.y += 70 * fdt; }
+    while (trail.length && trail[0].life <= 0) trail.shift();
+    for (const t2 of trail) { const a = t2.life / 0.32; c.fillStyle = `rgba(255,${150 + 90 * a},${60 + 120 * a},${0.5 * a})`; circ(c, t2.x, t2.y, 0.6 + 2.2 * a); }
     const dash = p.skill > 0 && g.pilot.active === 'dash';
     if (dash) for (let k = 3; k > 0; k--) { c.globalAlpha = 0.15 * k; drawShip(c, g.pilot.id, p.x, p.y + k * 7, time); }
     c.globalAlpha = p.inv > 0 && !dash && Math.sin(time * 40) > 0 ? 0.35 : 1;
@@ -139,19 +192,23 @@ export function draw(c, g, time, view = {}) {
   // enemy bullets on top
   for (const b of g.eb) {
     if (b.kind === 'rock') { c.fillStyle = b.color; c.save(); c.translate(b.x, b.y); c.rotate(b.t * 3); blob(c, b.r + 1); c.restore(); continue; }
+    c.globalAlpha = 0.3; c.fillStyle = b.color; circ(c, b.x, b.y, b.r + 3.5); c.globalAlpha = 1;
     c.fillStyle = b.color; circ(c, b.x, b.y, b.r + 1);
     c.fillStyle = '#ffffff'; circ(c, b.x, b.y, Math.max(1, b.r - 1));
   }
   // particles
-  for (const f of g.fx) { c.globalAlpha = Math.max(0, f.life / f.max); c.fillStyle = f.color; c.fillRect((f.x - f.size / 2) | 0, (f.y - f.size / 2) | 0, Math.ceil(f.size), Math.ceil(f.size)); }
+  for (const f of g.fx) {
+    if (f.ring) { c.globalAlpha = Math.max(0, f.life / f.max) * 0.8; c.strokeStyle = f.color; c.lineWidth = 2.2 * (f.life / f.max) + 0.5; c.beginPath(); c.arc(f.x, f.y, f.r, 0, TAU); c.stroke(); continue; }
+    c.globalAlpha = Math.max(0, f.life / f.max); c.fillStyle = f.color; circ(c, f.x, f.y, f.size * 0.6);
+  }
   c.globalAlpha = 1;
   if (g.warp < 1) { c.fillStyle = 'rgba(140,90,255,.12)'; c.fillRect(0, 0, W, H); }
   c.restore();
 }
 
 function drawEnemy(c, e, pal, time) {
-  c.save(); c.translate(e.x | 0, e.y | 0);
-  const hit = e.flash > 0 && Math.floor(time * 30) % 2 === 0; if (e.flash > 0) e.flash -= 1 / 60;   // flicker white when hit
+  c.save(); c.translate(e.x, e.y);
+  const hit = e.flash > 0 && Math.floor(time * 30) % 2 === 0; if (e.flash > 0) e.flash -= fdt;   // flicker white when hit
   const A = hit ? '#ffffff' : pal.a, B = hit ? '#ffffff' : pal.b, G = pal.glow;
   switch (e.type) {
     case 'drone': c.fillStyle = B; poly(c, [[0, 9], [9, -2], [5, -8], [-5, -8], [-9, -2]]); c.fillStyle = A; poly(c, [[0, 6], [6, -2], [0, -6], [-6, -2]]); c.fillStyle = G; c.fillRect(-1, -1, 3, 3); break;
@@ -179,7 +236,7 @@ function drawQueen(c, col, time) {
 }
 
 function drawBoss(c, g, b, time) {
-  c.save(); c.translate(b.x | 0, b.y | 0);
+  c.save(); c.translate(b.x, b.y);
   const hit = b.flash > 0 && Math.floor(time * 30) % 3 === 0, pal = g.st.pal;
   const A = hit ? '#ffffff' : pal.a, B = hit ? '#ffffff' : pal.b, G = pal.glow;
   if (g.phase === 'bossDown') c.translate((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4);

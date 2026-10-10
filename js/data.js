@@ -1,5 +1,5 @@
 // Star Squad: pilots, upgrades, shop, enemies and stage timelines. Pure data (no DOM) so tools/sim.mjs can run the game in Node.
-export const W = 288, H = 512;            // playfield in game pixels (scaled up, nearest-neighbour)
+export const W = 360, H = 640;            // playfield in game units (drawn at the screen's full resolution)
 
 // ------------------------------------------------------------------ pilots (names / descriptions live in i18n.js)
 export const PILOTS = [
